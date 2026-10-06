@@ -76,7 +76,9 @@ class FakeUploadClient:
         return FakeResponse(204)
 
 
-class FailingDownloadClient:
+class FlakyDownloadClient:
+    calls: ClassVar[int] = 0
+
     def __init__(self, _timeout: Any) -> None:
         return None
 
@@ -88,6 +90,32 @@ class FailingDownloadClient:
 
     async def get(self, url: str, headers: dict[str, str]) -> FakeResponse:
         _ = headers
+        type(self).calls += 1
+        if type(self).calls < 3:
+            request = httpx.Request("GET", url)
+            raise httpx.ConnectError("transient eof", request=request)
+        return FakeResponse(
+            200,
+            content=b"hello",
+            headers={"X-File-Name": "hello.txt", "Content-Type": "text/plain"},
+        )
+
+
+class FailingDownloadClient:
+    calls: ClassVar[int] = 0
+
+    def __init__(self, _timeout: Any) -> None:
+        return None
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def get(self, url: str, headers: dict[str, str]) -> FakeResponse:
+        _ = headers
+        type(self).calls += 1
         request = httpx.Request("GET", url)
         raise httpx.ConnectError("connection refused", request=request)
 
@@ -118,13 +146,42 @@ def test_download_attachment_refreshes_token_after_unauthorized() -> None:
     assert asyncio.run(exercise()) == (b"hello", "hello.txt", "text/plain")
 
 
+def test_download_attachment_retries_transient_network_error(monkeypatch) -> None:
+    async def exercise() -> tuple[bytes, str, str]:
+        FlakyDownloadClient.calls = 0
+        sleeps: list[float] = []
+
+        async def token_provider(force: bool = False) -> str:
+            assert force is False
+            return "token"
+
+        async def fake_sleep(delay: float) -> None:
+            sleeps.append(delay)
+
+        monkeypatch.setattr(transfers.asyncio, "sleep", fake_sleep)
+        result = await transfers.download_attachment(
+            server_url="http://127.0.0.1:8000",
+            session_id="sess_1",
+            file_id="file_1",
+            access_token_provider=token_provider,
+            http_client_factory=FlakyDownloadClient,
+        )
+        assert FlakyDownloadClient.calls == 3
+        assert sleeps == [0.1, 0.2]
+        return result
+
+    assert asyncio.run(exercise()) == (b"hello", "hello.txt", "text/plain")
+
+
 def test_download_attachment_network_error_is_explicit() -> None:
     async def exercise() -> None:
+        FailingDownloadClient.calls = 0
+
         async def token_provider(force: bool = False) -> str:
             _ = force
             return "token"
 
-        with pytest.raises(ConnectorNetworkError, match="attachment download failed"):
+        with pytest.raises(ConnectorNetworkError, match="after 3 attempts"):
             await transfers.download_attachment(
                 server_url="http://127.0.0.1:8000",
                 session_id="sess_1",
@@ -132,6 +189,7 @@ def test_download_attachment_network_error_is_explicit() -> None:
                 access_token_provider=token_provider,
                 http_client_factory=FailingDownloadClient,
             )
+        assert FailingDownloadClient.calls == 3
 
     asyncio.run(exercise())
 
