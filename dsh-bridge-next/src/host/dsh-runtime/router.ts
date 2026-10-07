@@ -11,7 +11,7 @@ import { projectHistoryAsync } from './history.js'
 import { sessionId, nativeSessionId } from './identity.js'
 import type { NativeRuntime } from './native.js'
 import { lastTurnEndKind } from './native.js'
-import { SyncFeed, type SyncBatch } from './sync.js'
+import { SyncFeed, SYNC_ACK_TIMEOUT_MS, type SyncBatch } from './sync.js'
 import type { TimelineItem } from './types.js'
 
 export interface SessionReader {
@@ -57,7 +57,7 @@ export class RuntimeRouter {
           if (this.feed !== feed) return
           this.feed = undefined
           this.failed?.(error, feed.id)
-        }, 60_000, params.checkpointVersion === 1)
+        }, SYNC_ACK_TIMEOUT_MS, params.checkpointVersion === 1)
         this.feed = feed
         setTimeout(() => { if (this.feed === feed) feed.start() }, 0)
         return { streamId: feed.id, projectionVersion: PROJECTION_VERSION, ...(params.checkpointVersion === 1 ? { checkpointVersion: 1 } : {}) }

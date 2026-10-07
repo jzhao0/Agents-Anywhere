@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { RuntimeServer, MAX_FRAME_BYTES, type Endpoint } from '../../src/host/dsh-runtime/server.js'
-import { SyncFeed, type SyncBatch } from '../../src/host/dsh-runtime/sync.js'
+import { SyncFeed, SYNC_ACK_TIMEOUT_MS, type SyncBatch } from '../../src/host/dsh-runtime/sync.js'
 import { sessionId } from '../../src/host/dsh-runtime/identity.js'
 import { nativeRuntime } from '../fixtures/native-runtime.js'
 
@@ -156,6 +156,11 @@ test('an oversized session aborts only its snapshot and can recover without losi
     await until(() => ops().some(op => op.kind === 'snapshot.commit' && op.sessionId === sessionId('recovery', 'persisted-only')))
     assert.deepEqual(failures, [])
   } finally { feed.close(); await fixture.ctx.fiber.dispose(); await rm(home, { recursive: true, force: true }) }
+})
+
+test('production sync ACK budget tolerates slow cloud ingestion while remaining bounded', () => {
+  assert.equal(SYNC_ACK_TIMEOUT_MS, 180_000)
+  assert.ok(SYNC_ACK_TIMEOUT_MS < 10 * 60_000)
 })
 
 test('missing ACK has a bounded wait and reports a recoverable stream failure', { timeout: 10_000 }, async () => {

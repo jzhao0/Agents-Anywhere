@@ -23,6 +23,7 @@ function matchesCheckpoint(value: unknown, projection: SessionProjection): boole
 const MAX_BUFFER = 10_000
 const MAX_BYTES = 6 * 1024 * 1024
 export const SYNC_FLUSH_MS = Math.ceil(1000 / 30)
+export const SYNC_ACK_TIMEOUT_MS = 180_000
 
 class SyncTransportError extends Error {}
 
@@ -50,7 +51,7 @@ export class SyncFeed {
 
   constructor(private native: NativeRuntime, private namespace: string,
     private notify: (batch: SyncBatch) => void, private failed: (error: unknown) => void,
-    private ackTimeoutMs = 60_000, private durableCheckpoints = false) {
+    private ackTimeoutMs = SYNC_ACK_TIMEOUT_MS, private durableCheckpoints = false) {
     this.unwatch = native.watch(change => {
       if (this.closed) return
       try { this.queuedBytes += jsonBytes(change) }
